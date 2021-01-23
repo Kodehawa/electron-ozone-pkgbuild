@@ -42,7 +42,7 @@ sha256sums=('SKIP'
             '38fb5218331d6e03915490dab64f7b8bf26833a581d1aaa02090437c67e9439c'
             '6e919c9712d8fe6c2918778df1f8c2ee0675a87a48be5d2aaa54e320703ced4b' 
             '771292942c0901092a402cc60ee883877a99fb804cb54d568c8c6c94565a48e1'
-            '2c1b3490a54a78a84c85be2b65a27120fc8694ebaffb4322ae4653b83ba4ad4c')
+            '2ae20d0b4d6a1ca3fcc041fa759cd067fafb05b41d01f3375fdd287a7b8c6433')
 
 _system_libs=('ffmpeg'
               'flac'

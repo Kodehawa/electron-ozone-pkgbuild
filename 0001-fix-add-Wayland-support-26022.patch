@@ -1,4 +1,4 @@
-From 0ebb0029b16adbd7e8d170998c264449cc47b433 Mon Sep 17 00:00:00 2001
+From f27628c18fd397e5ed7050972a46d349da50150d Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Valentin=20H=C4=83loiu?= <valentin.haloiu@gmail.com>
 Date: Sat, 17 Oct 2020 14:54:36 +0200
 Subject: [PATCH] fix: add Wayland support
@@ -6,7 +6,7 @@ Subject: [PATCH] fix: add Wayland support
 ---
  chromium_src/BUILD.gn                         |  13 +-
  filenames.gni                                 |  27 +-
- shell/browser/api/electron_api_base_window.cc |   6 +-
+ shell/browser/api/electron_api_base_window.cc |   2 +-
  shell/browser/electron_browser_main_parts.cc  |  47 +++-
  shell/browser/electron_browser_main_parts.h   |   5 +-
  shell/browser/native_window.cc                |   2 +-
@@ -16,7 +16,7 @@ Subject: [PATCH] fix: add Wayland support
  shell/browser/ui/message_box_gtk.cc           |  24 +-
  shell/browser/ui/views/menu_bar.cc            |   6 +-
  shell/browser/ui/views/menu_bar.h             |   2 +-
- 12 files changed, 273 insertions(+), 160 deletions(-)
+ 12 files changed, 271 insertions(+), 158 deletions(-)
 
 diff --git a/chromium_src/BUILD.gn b/chromium_src/BUILD.gn
 index a8f7fd0e5..eb068d688 100644
@@ -97,18 +97,14 @@ index c6e82327c..134ba9a23 100644
      "chromium_src/chrome/browser/certificate_manager_model.cc",
      "chromium_src/chrome/browser/certificate_manager_model.h",
 diff --git a/shell/browser/api/electron_api_base_window.cc b/shell/browser/api/electron_api_base_window.cc
-index f4b0fe95f..739f5e2d8 100644
+index f4b0fe95f..5b6d29c5e 100644
 --- a/shell/browser/api/electron_api_base_window.cc
 +++ b/shell/browser/api/electron_api_base_window.cc
-@@ -1009,9 +1009,9 @@ void BaseWindow::SetIcon(v8::Isolate* isolate, v8::Local<v8::Value> icon) {
- 
- #if defined(OS_WIN)
+@@ -1011,7 +1011,7 @@ void BaseWindow::SetIcon(v8::Isolate* isolate, v8::Local<v8::Value> icon) {
    static_cast<NativeWindowViews*>(window_.get())
--      ->SetIcon(native_image->GetHICON(GetSystemMetrics(SM_CXSMICON)),
--                native_image->GetHICON(GetSystemMetrics(SM_CXICON)));
+       ->SetIcon(native_image->GetHICON(GetSystemMetrics(SM_CXSMICON)),
+                 native_image->GetHICON(GetSystemMetrics(SM_CXICON)));
 -#elif defined(USE_X11)
-+      ->SetIcon(icon->GetHICON(GetSystemMetrics(SM_CXSMICON)),
-+                icon->GetHICON(GetSystemMetrics(SM_CXICON)));
 +#elif defined(OS_LINUX)
    static_cast<NativeWindowViews*>(window_.get())
        ->SetIcon(native_image->image().AsImageSkia());
