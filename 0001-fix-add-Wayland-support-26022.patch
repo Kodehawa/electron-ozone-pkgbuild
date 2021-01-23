@@ -1,14 +1,14 @@
-From 5f3ff81f0bae6912ffc4a947b9ba40893eab4829 Mon Sep 17 00:00:00 2001
+From e1e14ab5575e22830a8115b1c5d9527685eec03c Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Valentin=20H=C4=83loiu?= <valentin.haloiu@gmail.com>
-Date: Tue, 20 Oct 2020 20:24:52 +0200
-Subject: [PATCH] fix: add Wayland support (#26022)
+Date: Sat, 17 Oct 2020 14:54:36 +0200
+Subject: [PATCH] fix: add Wayland support
 
 ---
  chromium_src/BUILD.gn                         |  13 +-
  filenames.gni                                 |  27 +-
- shell/browser/api/electron_api_base_window.cc |   2 +-
- shell/browser/electron_browser_main_parts.cc  |  46 +++-
- shell/browser/electron_browser_main_parts.h   |   3 +
+ shell/browser/api/electron_api_base_window.cc |   6 +-
+ shell/browser/electron_browser_main_parts.cc  |  49 +++-
+ shell/browser/electron_browser_main_parts.h   |   5 +-
  shell/browser/native_window.cc                |   2 +-
  shell/browser/native_window_views.cc          | 260 ++++++++++--------
  shell/browser/ui/file_dialog_gtk.cc           |  23 +-
@@ -16,10 +16,10 @@ Subject: [PATCH] fix: add Wayland support (#26022)
  shell/browser/ui/message_box_gtk.cc           |  24 +-
  shell/browser/ui/views/menu_bar.cc            |   6 +-
  shell/browser/ui/views/menu_bar.h             |   2 +-
- 12 files changed, 269 insertions(+), 157 deletions(-)
+ 12 files changed, 275 insertions(+), 160 deletions(-)
 
 diff --git a/chromium_src/BUILD.gn b/chromium_src/BUILD.gn
-index 19271e18c..b0f5f9ee6 100644
+index a8f7fd0e5..eb068d688 100644
 --- a/chromium_src/BUILD.gn
 +++ b/chromium_src/BUILD.gn
 @@ -93,9 +93,18 @@ static_library("chrome") {
@@ -44,7 +44,7 @@ index 19271e18c..b0f5f9ee6 100644
        "//chrome/browser/ui/views/status_icons/concat_menu_model.h",
        "//chrome/browser/ui/views/status_icons/status_icon_linux_dbus.cc",
 diff --git a/filenames.gni b/filenames.gni
-index 4284a4ef5..764dcdaf4 100644
+index c6e82327c..134ba9a23 100644
 --- a/filenames.gni
 +++ b/filenames.gni
 @@ -1,3 +1,5 @@
@@ -74,7 +74,7 @@ index 4284a4ef5..764dcdaf4 100644
      "shell/browser/browser_linux.cc",
      "shell/browser/lib/power_observer_linux.cc",
      "shell/browser/lib/power_observer_linux.h",
-@@ -633,6 +625,21 @@ filenames = {
+@@ -634,6 +626,21 @@ filenames = {
      "shell/utility/electron_content_utility_client.h",
    ]
  
@@ -97,23 +97,27 @@ index 4284a4ef5..764dcdaf4 100644
      "chromium_src/chrome/browser/certificate_manager_model.cc",
      "chromium_src/chrome/browser/certificate_manager_model.h",
 diff --git a/shell/browser/api/electron_api_base_window.cc b/shell/browser/api/electron_api_base_window.cc
-index 24ed27c08..35ab75c3b 100644
+index f4b0fe95f..739f5e2d8 100644
 --- a/shell/browser/api/electron_api_base_window.cc
 +++ b/shell/browser/api/electron_api_base_window.cc
-@@ -999,7 +999,7 @@ void BaseWindow::SetIcon(gin::Handle<NativeImage> icon) {
+@@ -1009,9 +1009,9 @@ void BaseWindow::SetIcon(v8::Isolate* isolate, v8::Local<v8::Value> icon) {
+ 
+ #if defined(OS_WIN)
    static_cast<NativeWindowViews*>(window_.get())
-       ->SetIcon(icon->GetHICON(GetSystemMetrics(SM_CXSMICON)),
-                 icon->GetHICON(GetSystemMetrics(SM_CXICON)));
+-      ->SetIcon(native_image->GetHICON(GetSystemMetrics(SM_CXSMICON)),
+-                native_image->GetHICON(GetSystemMetrics(SM_CXICON)));
 -#elif defined(USE_X11)
++      ->SetIcon(icon->GetHICON(GetSystemMetrics(SM_CXSMICON)),
++                icon->GetHICON(GetSystemMetrics(SM_CXICON)));
 +#elif defined(OS_LINUX)
    static_cast<NativeWindowViews*>(window_.get())
-       ->SetIcon(icon->image().AsImageSkia());
+       ->SetIcon(native_image->image().AsImageSkia());
  #endif
 diff --git a/shell/browser/electron_browser_main_parts.cc b/shell/browser/electron_browser_main_parts.cc
-index 92f3e93c4..fb4c4c94f 100644
+index 2de909e34..5172418a5 100644
 --- a/shell/browser/electron_browser_main_parts.cc
 +++ b/shell/browser/electron_browser_main_parts.cc
-@@ -57,20 +57,32 @@
+@@ -59,21 +59,33 @@
  #include "ui/wm/core/wm_state.h"
  #endif
  
@@ -122,6 +126,7 @@ index 92f3e93c4..fb4c4c94f 100644
  #include "base/environment.h"
  #include "base/nix/xdg_util.h"
  #include "base/threading/thread_task_runner_handle.h"
+ #include "ui/base/x/x11_error_handler.h"
 +#include "ui/gtk/gtk_ui.h"
 +#include "ui/gtk/gtk_ui_delegate.h"
 +#include "ui/gtk/gtk_util.h"
@@ -151,7 +156,7 @@ index 92f3e93c4..fb4c4c94f 100644
  #endif
  
  #if defined(OS_WIN)
-@@ -425,11 +437,15 @@ void ElectronBrowserMainParts::PostDestroyThreads() {
+@@ -385,11 +397,15 @@ void ElectronBrowserMainParts::PostDestroyThreads() {
  
  void ElectronBrowserMainParts::ToolkitInitialized() {
  #if defined(USE_X11)
@@ -172,7 +177,7 @@ index 92f3e93c4..fb4c4c94f 100644
    views::LinuxUI::SetInstance(linux_ui);
    linux_ui->Initialize();
  
-@@ -491,7 +507,8 @@ void ElectronBrowserMainParts::PreMainMessageLoopRun() {
+@@ -451,7 +467,8 @@ void ElectronBrowserMainParts::PreMainMessageLoopRun() {
  #endif
  
  #if defined(USE_X11)
@@ -182,25 +187,43 @@ index 92f3e93c4..fb4c4c94f 100644
  #endif
  
    content::WebUIControllerFactory::RegisterFactory(
-@@ -533,6 +550,13 @@ void ElectronBrowserMainParts::PostMainMessageLoopStart() {
+@@ -488,12 +505,22 @@ void ElectronBrowserMainParts::PreDefaultMainMessageLoopRun(
+ }
+ 
+ void ElectronBrowserMainParts::PostMainMessageLoopStart() {
++<<<<<<< HEAD
+ #if defined(USE_X11)
+   // Installs the X11 error handlers for the browser process after the
    // main message loop has started. This will allow us to exit cleanly
    // if X exits before us.
-   ui::SetX11ErrorHandlers(BrowserX11ErrorHandler, BrowserX11IOErrorHandler);
-+#elif defined(USE_OZONE)
+   ui::SetErrorHandlers(
+       base::BindOnce(base::RunLoop::QuitCurrentWhenIdleClosureDeprecated()));
++=======
++#if defined(USE_OZONE)
 +  if (features::IsUsingOzonePlatform()) {
 +    auto shutdown_cb =
 +        base::BindOnce(base::RunLoop::QuitCurrentWhenIdleClosureDeprecated());
 +    ui::OzonePlatform::GetInstance()->PostMainMessageLoopStart(
 +        std::move(shutdown_cb));
 +  }
++>>>>>>> 398808a26 (fix: add Wayland support)
  #endif
  #if defined(OS_LINUX)
    bluez::DBusBluezManagerWrapperLinux::Initialize();
 diff --git a/shell/browser/electron_browser_main_parts.h b/shell/browser/electron_browser_main_parts.h
-index 3d084c926..e9dba3c0a 100644
+index 3a98afe7b..0839eb9e8 100644
 --- a/shell/browser/electron_browser_main_parts.h
 +++ b/shell/browser/electron_browser_main_parts.h
-@@ -134,6 +134,9 @@ class ElectronBrowserMainParts : public content::BrowserMainParts {
+@@ -29,7 +29,7 @@ class WMState;
+ }
+ #endif
+ 
+-#if defined(OS_LINUX)
++#if defined(USE_X11)
+ namespace ui {
+ class GtkUiDelegate;
+ }
+@@ -133,6 +133,9 @@ class ElectronBrowserMainParts : public content::BrowserMainParts {
  
  #if defined(USE_X11)
    std::unique_ptr<ui::GtkUiDelegate> gtk_ui_delegate_;
@@ -211,7 +234,7 @@ index 3d084c926..e9dba3c0a 100644
    std::unique_ptr<DarkThemeObserver> dark_theme_observer_;
  #endif
 diff --git a/shell/browser/native_window.cc b/shell/browser/native_window.cc
-index 72bdc6b6a..2506198ab 100644
+index f9d30f5db..ff099711c 100644
 --- a/shell/browser/native_window.cc
 +++ b/shell/browser/native_window.cc
 @@ -109,7 +109,7 @@ void NativeWindow::InitFromOptions(const gin_helper::Dictionary& options) {
@@ -224,7 +247,7 @@ index 72bdc6b6a..2506198ab 100644
    if (options.Get(options::kResizable, &resizable)) {
      SetResizable(resizable);
 diff --git a/shell/browser/native_window_views.cc b/shell/browser/native_window_views.cc
-index 01b7b80ec..6ae21cd32 100644
+index 2f7ff92b5..53dfb0e42 100644
 --- a/shell/browser/native_window_views.cc
 +++ b/shell/browser/native_window_views.cc
 @@ -44,13 +44,17 @@
@@ -260,9 +283,9 @@ index 01b7b80ec..6ae21cd32 100644
 +#endif
 +
  #elif defined(OS_WIN)
+ #include "base/win/win_util.h"
  #include "shell/browser/ui/views/win_frame_view.h"
- #include "shell/browser/ui/win/electron_desktop_native_widget_aura.h"
-@@ -211,45 +219,56 @@ NativeWindowViews::NativeWindowViews(const gin_helper::Dictionary& options,
+@@ -212,45 +220,56 @@ NativeWindowViews::NativeWindowViews(const gin_helper::Dictionary& options,
    options.Get(options::kType, &window_type);
  
  #if defined(USE_X11)
@@ -352,25 +375,25 @@ index 01b7b80ec..6ae21cd32 100644
  #endif
  
  #if defined(OS_WIN)
-@@ -331,14 +350,11 @@ NativeWindowViews::~NativeWindowViews() {
+@@ -332,14 +351,11 @@ NativeWindowViews::~NativeWindowViews() {
  
  void NativeWindowViews::SetGTKDarkThemeEnabled(bool use_dark_theme) {
  #if defined(USE_X11)
 -  if (use_dark_theme) {
+-    ui::SetStringProperty(static_cast<x11::Window>(GetAcceleratedWidget()),
+-                          gfx::GetAtom("_GTK_THEME_VARIANT"),
+-                          gfx::GetAtom("UTF8_STRING"), "dark");
+-  } else {
 +  if (!features::IsUsingOzonePlatform()) {
 +    const std::string color = use_dark_theme ? "dark" : "light";
      ui::SetStringProperty(static_cast<x11::Window>(GetAcceleratedWidget()),
                            gfx::GetAtom("_GTK_THEME_VARIANT"),
--                          gfx::GetAtom("UTF8_STRING"), "dark");
--  } else {
--    ui::SetStringProperty(static_cast<x11::Window>(GetAcceleratedWidget()),
--                          gfx::GetAtom("_GTK_THEME_VARIANT"),
 -                          gfx::GetAtom("UTF8_STRING"), "light");
 +                          gfx::GetAtom("UTF8_STRING"), color);
    }
  #endif
  }
-@@ -395,7 +411,7 @@ void NativeWindowViews::Show() {
+@@ -396,7 +412,7 @@ void NativeWindowViews::Show() {
    NotifyWindowShow();
  
  #if defined(USE_X11)
@@ -379,7 +402,7 @@ index 01b7b80ec..6ae21cd32 100644
      global_menu_bar_->OnWindowMapped();
  #endif
  }
-@@ -406,7 +422,7 @@ void NativeWindowViews::ShowInactive() {
+@@ -407,7 +423,7 @@ void NativeWindowViews::ShowInactive() {
    NotifyWindowShow();
  
  #if defined(USE_X11)
@@ -388,7 +411,7 @@ index 01b7b80ec..6ae21cd32 100644
      global_menu_bar_->OnWindowMapped();
  #endif
  }
-@@ -420,7 +436,7 @@ void NativeWindowViews::Hide() {
+@@ -421,7 +437,7 @@ void NativeWindowViews::Hide() {
    NotifyWindowHide();
  
  #if defined(USE_X11)
@@ -397,7 +420,7 @@ index 01b7b80ec..6ae21cd32 100644
      global_menu_bar_->OnWindowUnmapped();
  #endif
  }
-@@ -432,8 +448,14 @@ bool NativeWindowViews::IsVisible() {
+@@ -433,8 +449,14 @@ bool NativeWindowViews::IsVisible() {
  bool NativeWindowViews::IsEnabled() {
  #if defined(OS_WIN)
    return ::IsWindowEnabled(GetAcceleratedWidget());
@@ -414,7 +437,7 @@ index 01b7b80ec..6ae21cd32 100644
  #endif
  }
  
-@@ -470,15 +492,17 @@ void NativeWindowViews::SetEnabledInternal(bool enable) {
+@@ -471,15 +493,17 @@ void NativeWindowViews::SetEnabledInternal(bool enable) {
  #if defined(OS_WIN)
    ::EnableWindow(GetAcceleratedWidget(), enable);
  #elif defined(USE_X11)
@@ -441,7 +464,7 @@ index 01b7b80ec..6ae21cd32 100644
    }
  #endif
  }
-@@ -584,7 +608,7 @@ bool NativeWindowViews::IsFullscreen() const {
+@@ -599,7 +623,7 @@ bool NativeWindowViews::IsFullscreen() const {
  }
  
  void NativeWindowViews::SetBounds(const gfx::Rect& bounds, bool animate) {
@@ -450,7 +473,7 @@ index 01b7b80ec..6ae21cd32 100644
    // On Linux and Windows the minimum and maximum size should be updated with
    // window size when window is not resizable.
    if (!resizable_) {
-@@ -675,11 +699,13 @@ bool NativeWindowViews::MoveAbove(const std::string& sourceId) {
+@@ -690,11 +714,13 @@ bool NativeWindowViews::MoveAbove(const std::string& sourceId) {
                   0, 0, 0,
                   SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
  #elif defined(USE_X11)
@@ -468,7 +491,7 @@ index 01b7b80ec..6ae21cd32 100644
  #endif
  
    return true;
-@@ -695,8 +721,10 @@ void NativeWindowViews::MoveTop() {
+@@ -710,8 +736,10 @@ void NativeWindowViews::MoveTop() {
                   size.width(), size.height(),
                   SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
  #elif defined(USE_X11)
@@ -481,7 +504,7 @@ index 01b7b80ec..6ae21cd32 100644
  #endif
  }
  
-@@ -881,8 +909,10 @@ void NativeWindowViews::SetSkipTaskbar(bool skip) {
+@@ -894,8 +922,10 @@ void NativeWindowViews::SetSkipTaskbar(bool skip) {
      taskbar_host_.RestoreThumbarButtons(GetAcceleratedWidget());
    }
  #elif defined(USE_X11)
@@ -494,7 +517,7 @@ index 01b7b80ec..6ae21cd32 100644
  #endif
  }
  
-@@ -972,23 +1002,27 @@ void NativeWindowViews::SetIgnoreMouseEvents(bool ignore, bool forward) {
+@@ -993,23 +1023,27 @@ void NativeWindowViews::SetIgnoreMouseEvents(bool ignore, bool forward) {
      SetForwardMouseMessages(forward);
    }
  #elif defined(USE_X11)
@@ -539,7 +562,7 @@ index 01b7b80ec..6ae21cd32 100644
    }
  #endif
  }
-@@ -1016,22 +1050,24 @@ void NativeWindowViews::SetFocusable(bool focusable) {
+@@ -1037,22 +1071,24 @@ void NativeWindowViews::SetFocusable(bool focusable) {
  
  void NativeWindowViews::SetMenu(ElectronMenuModel* menu_model) {
  #if defined(USE_X11)
@@ -578,7 +601,7 @@ index 01b7b80ec..6ae21cd32 100644
    }
  #endif
  
-@@ -1096,11 +1132,13 @@ void NativeWindowViews::SetParentWindow(NativeWindow* parent) {
+@@ -1117,11 +1153,13 @@ void NativeWindowViews::SetParentWindow(NativeWindow* parent) {
    NativeWindow::SetParentWindow(parent);
  
  #if defined(USE_X11)
@@ -597,7 +620,7 @@ index 01b7b80ec..6ae21cd32 100644
  #elif defined(OS_WIN)
    // To set parentship between windows into Windows is better to play with the
    //  owner instead of the parent, as Windows natively seems to do if a parent
-@@ -1175,14 +1213,16 @@ void NativeWindowViews::SetVisibleOnAllWorkspaces(bool visible,
+@@ -1196,14 +1234,16 @@ void NativeWindowViews::SetVisibleOnAllWorkspaces(bool visible,
  
  bool NativeWindowViews::IsVisibleOnAllWorkspaces() {
  #if defined(USE_X11)
@@ -702,7 +725,7 @@ index e3e778e9d..c119515e2 100644
  #endif
  
 diff --git a/shell/browser/ui/message_box_gtk.cc b/shell/browser/ui/message_box_gtk.cc
-index 1b0f859c8..b74d6d0c5 100644
+index 48dffeca9..739f4a8de 100644
 --- a/shell/browser/ui/message_box_gtk.cc
 +++ b/shell/browser/ui/message_box_gtk.cc
 @@ -13,10 +13,17 @@
@@ -724,7 +747,7 @@ index 1b0f859c8..b74d6d0c5 100644
  #define ANSI_FOREGROUND_RED "\x1b[31m"
  #define ANSI_FOREGROUND_BLACK "\x1b[30m"
  #define ANSI_TEXT_BOLD "\x1b[1m"
-@@ -133,11 +140,16 @@ class GtkMessageBox : public NativeWindowObserver {
+@@ -137,11 +144,16 @@ class GtkMessageBox : public NativeWindowObserver {
  
    void Show() {
      gtk_widget_show(dialog_);
@@ -791,5 +814,5 @@ index 20becd52a..d2411a0a9 100644
    SkColor disabled_color_;
  #endif
 -- 
-2.29.2
+2.30.0
 
