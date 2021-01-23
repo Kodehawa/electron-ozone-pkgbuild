@@ -1,4 +1,4 @@
-From e1e14ab5575e22830a8115b1c5d9527685eec03c Mon Sep 17 00:00:00 2001
+From 0ebb0029b16adbd7e8d170998c264449cc47b433 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Valentin=20H=C4=83loiu?= <valentin.haloiu@gmail.com>
 Date: Sat, 17 Oct 2020 14:54:36 +0200
 Subject: [PATCH] fix: add Wayland support
@@ -7,7 +7,7 @@ Subject: [PATCH] fix: add Wayland support
  chromium_src/BUILD.gn                         |  13 +-
  filenames.gni                                 |  27 +-
  shell/browser/api/electron_api_base_window.cc |   6 +-
- shell/browser/electron_browser_main_parts.cc  |  49 +++-
+ shell/browser/electron_browser_main_parts.cc  |  47 +++-
  shell/browser/electron_browser_main_parts.h   |   5 +-
  shell/browser/native_window.cc                |   2 +-
  shell/browser/native_window_views.cc          | 260 ++++++++++--------
@@ -16,7 +16,7 @@ Subject: [PATCH] fix: add Wayland support
  shell/browser/ui/message_box_gtk.cc           |  24 +-
  shell/browser/ui/views/menu_bar.cc            |   6 +-
  shell/browser/ui/views/menu_bar.h             |   2 +-
- 12 files changed, 275 insertions(+), 160 deletions(-)
+ 12 files changed, 273 insertions(+), 160 deletions(-)
 
 diff --git a/chromium_src/BUILD.gn b/chromium_src/BUILD.gn
 index a8f7fd0e5..eb068d688 100644
@@ -114,7 +114,7 @@ index f4b0fe95f..739f5e2d8 100644
        ->SetIcon(native_image->image().AsImageSkia());
  #endif
 diff --git a/shell/browser/electron_browser_main_parts.cc b/shell/browser/electron_browser_main_parts.cc
-index 2de909e34..5172418a5 100644
+index 2de909e34..f22ea1d08 100644
 --- a/shell/browser/electron_browser_main_parts.cc
 +++ b/shell/browser/electron_browser_main_parts.cc
 @@ -59,21 +59,33 @@
@@ -187,18 +187,10 @@ index 2de909e34..5172418a5 100644
  #endif
  
    content::WebUIControllerFactory::RegisterFactory(
-@@ -488,12 +505,22 @@ void ElectronBrowserMainParts::PreDefaultMainMessageLoopRun(
- }
- 
- void ElectronBrowserMainParts::PostMainMessageLoopStart() {
-+<<<<<<< HEAD
- #if defined(USE_X11)
-   // Installs the X11 error handlers for the browser process after the
-   // main message loop has started. This will allow us to exit cleanly
-   // if X exits before us.
+@@ -495,6 +512,14 @@ void ElectronBrowserMainParts::PostMainMessageLoopStart() {
    ui::SetErrorHandlers(
        base::BindOnce(base::RunLoop::QuitCurrentWhenIdleClosureDeprecated()));
-+=======
+ #endif
 +#if defined(USE_OZONE)
 +  if (features::IsUsingOzonePlatform()) {
 +    auto shutdown_cb =
@@ -206,10 +198,10 @@ index 2de909e34..5172418a5 100644
 +    ui::OzonePlatform::GetInstance()->PostMainMessageLoopStart(
 +        std::move(shutdown_cb));
 +  }
-+>>>>>>> 398808a26 (fix: add Wayland support)
- #endif
++#endif
  #if defined(OS_LINUX)
    bluez::DBusBluezManagerWrapperLinux::Initialize();
+ #endif
 diff --git a/shell/browser/electron_browser_main_parts.h b/shell/browser/electron_browser_main_parts.h
 index 3a98afe7b..0839eb9e8 100644
 --- a/shell/browser/electron_browser_main_parts.h

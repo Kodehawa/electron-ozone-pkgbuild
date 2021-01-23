@@ -9,7 +9,7 @@ provides=('electron')
 conflicts=('electron')
 _commit=8805b996e0d8cfb6e3921f9b586366bafb125b59
 _chromiumver=87.0.4280.141
-pkgrel=1
+pkgrel=2
 pkgdesc='Electron compiled with wayland support via Ozone'
 arch=('x86_64')
 url='https://electronjs.org/'
@@ -42,7 +42,7 @@ sha256sums=('SKIP'
             '38fb5218331d6e03915490dab64f7b8bf26833a581d1aaa02090437c67e9439c'
             '6e919c9712d8fe6c2918778df1f8c2ee0675a87a48be5d2aaa54e320703ced4b' 
             '771292942c0901092a402cc60ee883877a99fb804cb54d568c8c6c94565a48e1'
-            '059dbfd761a188c7a99fefea8d18b49a0fd00b4c10b98d5d08957c13224091a0')
+            '2c1b3490a54a78a84c85be2b65a27120fc8694ebaffb4322ae4653b83ba4ad4c')
 
 _system_libs=('ffmpeg'
               'flac'
